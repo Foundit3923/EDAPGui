@@ -8,6 +8,7 @@ import cv2
 import json
 from pathlib import Path
 import keyboard
+import pynput
 import webbrowser
 import requests
 
@@ -118,6 +119,8 @@ class APGui():
         self.SC_A_running = False
         self.WP_A_running = False
         self.RO_A_running = False
+        self.key_code = None
+        self.listener = None
 
         self.cv_view = False
 
@@ -184,10 +187,10 @@ class APGui():
         # global trap for these keys, the 'end' key will stop any current AP action
         # the 'home' key will start the FSD Assist.  May want another to start SC Assist
 
-        keyboard.add_hotkey(self.ed_ap.config['HotKey_StopAllAssists'], self.stop_all_assists)
-        keyboard.add_hotkey(self.ed_ap.config['HotKey_StartFSD'], self.callback, args=('fsd_start', None))
-        keyboard.add_hotkey(self.ed_ap.config['HotKey_StartSC'],  self.callback, args=('sc_start',  None))
-        keyboard.add_hotkey(self.ed_ap.config['HotKey_StartRobigo'],  self.callback, args=('robigo_start',  None))
+        self.listener = pynput.keyboard.Listener(
+            on_press = self.on_press
+        )
+        self.listener.start()
 
         # load default ship config file if specified
         try:
@@ -201,9 +204,7 @@ class APGui():
 
     # callback from the EDAP, to configure GUI items
     def callback(self, key, body=None):
-        if key == 'log':
-            self.log_msg(body)
-        elif key == 'fsd_stop':
+        if key == 'fsd_stop':
             logger.debug("Detected 'fsd_stop' key")
             self.checkboxvar['FSD Route Assist'].set(0)
             self.check_cb('FSD Route Assist')
@@ -232,10 +233,36 @@ class APGui():
             logger.debug("Detected 'afk_stop' key")
             self.checkboxvar['AFK Combat Assist'].set(0)
             self.check_cb('AFK Combat Assist')
+        elif key == 'log':
+            self.log_msg(body)
         elif key == 'jumpcount':
             self.update_jumpcount(body)
         elif key == 'statusline':
-            self.update_statusline(body)
+            self.update_statusline(body)        
+
+    def on_press(self,key):
+        numpad_keycodes = set([96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 110])
+        try:
+            self.key_code = key.vk
+        except AttributeError:
+            self.key_code = key.value.vk
+         
+        if self.key_code not in numpad_keycodes and self.key_code is not None:
+            #if the key_code does not corespond to numpad keys and the key_code is not None execute
+            key_str = str(key).split('.')[1]
+            if key_str == pynput.keyboard.KeyCode.from_char(self.ed_ap.config['HotKey_StopAllAssists']).char:
+                #logger.debug("matched end")
+                self.stop_all_assists()
+            elif key_str == pynput.keyboard.KeyCode.from_char(self.ed_ap.config['HotKey_StartFSD']).char:
+                #logger.debug("matched home")
+                self.callback('fsd_start', None)
+            elif key_str == pynput.keyboard.KeyCode.from_char(self.ed_ap.config['HotKey_StartSC']).char:
+                #logger.debug("matched insert")
+                self.callback('sc_start', None)
+            elif key_str == pynput.keyboard.KeyCode.from_char(self.ed_ap.config['HotKey_StartRobigo']).char:
+                #logger.debug("matched page_up")
+                self.callback('robigo_start', None)
+
 
     def calibrate_callback(self):
         msg = 'Select OK to begin Calibration. You must be in space and have a valid station targeted in center screen.'
@@ -266,6 +293,7 @@ class APGui():
         logger.debug("Entered: close_window")
         self.stop_fsd()
         self.stop_sc()
+        self.listener.stop()
         self.ed_ap.quit()
         sleep(0.1)
         self.root.destroy()
@@ -858,6 +886,7 @@ class APGui():
         self.stop_fsd()
         self.stop_sc()
         self.ed_ap.quit()
+        self.listener.stop()
         sleep(0.1)
 
         import sys

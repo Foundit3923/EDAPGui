@@ -52,8 +52,8 @@ class EDAutopilot:
             "FuelScoopTimeOut": 35,        # number of second to wait for full tank, might mean we are not scooping well or got a small scooper
             "DockingRetries": 30,          # number of time to attempt docking
             "HotKey_StartFSD": "home",     # if going to use other keys, need to look at the python keyboard package
-            "HotKey_StartSC": "ins",       # to determine other keynames, make sure these keys are not used in ED bindings
-            "HotKey_StartRobigo": "pgup",  # 
+            "HotKey_StartSC": "insert",       # to determine other keynames, make sure these keys are not used in ED bindings
+            "HotKey_StartRobigo": "page_up",  # 
             "HotKey_StopAllAssists": "end",
             "Robigo_Single_Loop": False,   # True means only 1 loop will executed and then terminate the Robigo, will not perform mission processing
             "EnableRandomness": False,     # add some additional random sleep times to avoid AP detection (0-3sec at specific locations)
