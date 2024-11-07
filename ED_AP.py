@@ -550,12 +550,14 @@ class EDAutopilot:
             #   img = cv2.resize(dst_image, dim, interpolation =cv2.INTER_AREA) 
             cv2.putText(icompass_image_d, f'Compass: {maxVal:5.2f} > {scr_reg.compass_match_thresh:5.2f}', (1, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1, cv2.LINE_AA)
             cv2.putText(icompass_image_d, f'Nav Point: {n_maxVal:5.2f} > {scr_reg.navpoint_match_thresh:5.2f}', (1, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1, cv2.LINE_AA)
+            #result = "x=" + str(result['x']) + ", y=" + str(result['y']) + ", z=" + str(result['z'])
+            #cv2.putText(icompass_image_d, "Nav Point Coords: " + result, (1, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1, cv2.LINE_AA)
             #cv2.circle(icompass_image_display, (pt[0]+n_pt[0], pt[1]+n_pt[1]), 5, (0, 255, 0), 3)
             cv2.imshow('compass', icompass_image_d)
             #cv2.imshow('nav', navpt_image)
             cv2.moveWindow('compass', self.cv_view_x, self.cv_view_y)
             #cv2.moveWindow('nav', self.cv_view_x, self.cv_view_y) 
-            cv2.waitKey(30)
+            cv2.waitKey(10)
 
         return result
 
@@ -781,6 +783,7 @@ class EDAutopilot:
     #
     def sun_avoid(self, scr_reg):
         logger.debug('align= avoid sun')
+        self.update_ap_status("Avoiding star")
         
         sleep(0.5)
 
@@ -790,6 +793,7 @@ class EDAutopilot:
         #  we'll add 3 more second for pad in case the user has a higher pitch rate than the vehicle can do   
         fail_safe_timeout = (120/self.pitchrate)+3
         starttime = time.time()  
+        failsafe_triggered = False
         
         # if sun in front of us, then keep pitching up until it is below us
         while self.is_sun_dead_ahead(scr_reg):
@@ -803,6 +807,7 @@ class EDAutopilot:
 
             # if we are pitching more than N seconds break, may be in high density area star area (close to core)
             if ((time.time()-starttime) > fail_safe_timeout):
+                failsafe_triggered = True
                 logger.debug('sun avoid failsafe timeout')
                 print("sun avoid failsafe timeout")
                 break
@@ -810,6 +815,16 @@ class EDAutopilot:
         sleep(0.35)                 # up slightly so not to overheat when scooping
         sleep(self.sunpitchuptime)  # some ships heat up too much and need pitch up a little further
         self.keys.send('PitchUpButton', state=0)
+        if failsafe_triggered:
+            #stop the ship
+            self.keys.send('SetSpeedZero')
+            while not self.is_sun_dead_ahead(scr_reg):
+                #pitch up until sun is dead ahead
+                self.pitchUp(15)
+            #pitch up 180 degrees
+            self.pitchUp(180)
+            self.keys.send('SetSpeed100')
+            sleep(3)
         
 
     # we know x, y offset of the nav point from center, use arc tan to determine the angle, convert to degrees
@@ -826,6 +841,10 @@ class EDAutopilot:
     def nav_align(self, scr_reg):
         """ Use the compass to find the nav point position.  Will then perform rotation and pitching
         to put the nav point in the middle of the compass, i.e. target right in front of us """
+        
+        self.update_ap_status("Nav Align")
+        
+        self.keys.send('SetSpeed50')
 
         close = 2
         if not (self.jn.ship_state()['status'] == 'in_supercruise' or self.jn.ship_state()['status'] == 'in_space'):
@@ -843,11 +862,15 @@ class EDAutopilot:
 
         # nav point must be behind us, pitch up until somewhat in front of us
         while off['z'] < 0:
-            if off['y'] >= 0:
-                self.pitchUp(90)
-            if off['y'] < 0:
-                self.pitchDown(90)
-            off = self.get_nav_offset(scr_reg)
+            if self.is_sun_dead_ahead(scr_reg):
+                self.sun_avoid(scr_reg)
+                sleep(5)
+            else:
+                if off['y'] >= 0:
+                    self.pitchUp(90)
+                if off['y'] < 0:
+                    self.pitchDown(90)
+                off = self.get_nav_offset(scr_reg)
 
         # check if converged, unlikely at this point
         if off['z'] > 0 and abs(off['x']) < close and abs(off['y']) < close:
@@ -858,15 +881,22 @@ class EDAutopilot:
         for ii in range(self.config['NavAlignTries']):
             off = self.get_nav_offset(scr_reg)
 
+            
+
             if off['z'] > 0 and abs(off['x']) < close and abs(off['y']) < close:
                 break
 
             while off['z'] < 0:
-                if off['y'] >= 0:
-                    self.pitchUp(45)
-                if off['y'] < 0:
-                    self.pitchDown(45)
-                off = self.get_nav_offset(scr_reg)
+                if self.is_sun_dead_ahead(scr_reg):
+                    self.sun_avoid(scr_reg)
+                    sleep(5)
+                else:
+                    self.rotateLeft(90)
+                    if off['y'] >= 0:
+                        self.pitchUp(45)
+                    if off['y'] < 0:
+                        self.pitchDown(45)
+                    off = self.get_nav_offset(scr_reg)
 
             # determine the angle and the hold time to keep the button pressed to roll that number of degrees
             ang = self.x_angle(off)%90
@@ -895,11 +925,14 @@ class EDAutopilot:
             sleep(0.15)  # wait for image to stablize
             off = self.get_nav_offset(scr_reg)
             while off['z'] < 0:
-                if off['y'] >= 0:
-                    self.pitchUp(45)
-                if off['y'] < 0:
-                    self.pitchDown(45)
-                off = self.get_nav_offset(scr_reg)
+                if self.is_sun_dead_ahead(scr_reg):
+                    self.sun_avoid(scr_reg)
+                else:
+                    if off['y'] >= 0:
+                        self.pitchUp(45)
+                    if off['y'] < 0:
+                        self.pitchDown(45)
+                    off = self.get_nav_offset(scr_reg)
 
             # calc pitch time based on nav point location
             # this is assuming 40 offset is max displacement on the Y axis.  So get percentage we are offset
@@ -920,6 +953,7 @@ class EDAutopilot:
 
     def target_align(self, scr_reg):
         """ Coarse align to the target to support FSD jumping """
+        self.update_ap_status("Target Align")
 
         self.vce.say("Target Align")
 
@@ -984,6 +1018,7 @@ class EDAutopilot:
             logger.error('align() not in sc or space')
             raise Exception('align() not in sc or space')
 
+        self.update_ap_status("Manuver to Target")
         self.sun_avoid(scr_reg)
         self.nav_align(scr_reg)
         self.keys.send('SetSpeed100')
@@ -1127,6 +1162,7 @@ class EDAutopilot:
     # TODO: nees to check for Thargoid interdiction and their wave that would shut us down,
     #       if thargoid, then we wait until reboot and continue on.. go back into FSD and align
     def jump(self, scr_reg):
+
         logger.debug('jump')
 
         self.vce.say("Frameshift Jump")
@@ -1179,6 +1215,16 @@ class EDAutopilot:
         self.keys.send('YawLeftButton', hold=htime)
 
         # check if refueling needed, ensure correct start type
+    
+    def target_above_ship(self, off, cutoff):
+        y_val = off['y']
+        if (y_val < cutoff):
+            self.update_ap_status(f'Target below ship. y_val= {y_val}')
+            
+            return False
+        else:
+            self.update_ap_status(f'Target above ship. y_val= {y_val}')
+            return True
 
     #
     def refuel(self, scr_reg):
@@ -1194,6 +1240,32 @@ class EDAutopilot:
             raise Exception('not ready to refuel')
         
         is_star_scoopable = self.jn.ship_state()['star_class'] in scoopable_stars
+
+        remaining_jumps = self.total_jumps - self.jump_cnt
+        self.update_ap_status(f'{remaining_jumps}')
+        check_count = 0
+        target_above = 0
+        target_below = 0
+        cutoff = 0
+        while remaining_jumps != 0 and check_count <= 9:
+            self.update_ap_status("Identifying target location")
+            limit = 10
+            for i in range(limit):
+                off = self.get_nav_offset(scr_reg)
+                self.update_ap_status(f'{off}')
+                ang = self.x_angle(off)%90
+                htime = ang/self.rollrate
+                
+                if self.target_above_ship(off, cutoff):
+                    target_above += 1
+                else:
+                    target_below += 1
+            self.update_ap_status(f'below: {target_below}, above: {target_above}')
+            check_count += 1
+        if target_below > target_above:
+            self.rotateLeft(180)
+            sleep(3)
+
 
         # if the sun is not scoopable, then set a low low threshold so we can pick up the dull red
         # sun types.  Since we won't scoop it doesn't matter how much we pitch up
@@ -1396,27 +1468,32 @@ class EDAutopilot:
             self.update_overlay()
 
             if self.jn.ship_state()['status'] == 'in_space' or self.jn.ship_state()['status'] == 'in_supercruise':
-                self.update_ap_status("Align")
+                if not self.is_sun_dead_ahead(scr_reg):
+                    self.update_ap_status("Align")
 
-                self.mnvr_to_target(scr_reg)
+                    self.mnvr_to_target(scr_reg)
 
-                self.update_ap_status("Jump")
+                    if self.is_sun_dead_ahead(scr_reg):
+                        self.sun_avoid(scr_reg)
+                        self.mnvr_to_target(scr_reg)
 
-                self.jump(scr_reg)
+                    self.update_ap_status("Jump")
 
-                # update jump counters
-                self.total_dist_jumped += self.jn.ship_state()['dist_jumped']
-                self.total_jumps = self.jump_cnt+self.jn.ship_state()['jumps_remains']
-                
-                # reset, upon next Jump the Journal will be updated again, unless last jump, so we need to clear this out
-                self.jn.ship_state()['jumps_remains'] = 0
+                    self.jump(scr_reg)
 
-                self.update_overlay()
+                    # update jump counters
+                    self.total_dist_jumped += self.jn.ship_state()['dist_jumped']
+                    self.total_jumps = self.jump_cnt+self.jn.ship_state()['jumps_remains']
+                    
+                    # reset, upon next Jump the Journal will be updated again, unless last jump, so we need to clear this out
+                    self.jn.ship_state()['jumps_remains'] = 0
 
-                avg_time_jump = (time.time()-starttime)/self.jump_cnt
-                self.ap_ckb('jumpcount', "Dist: {:,.1f}".format(self.total_dist_jumped)+"ly"+
-                            "  Jumps: {}of{}".format(self.jump_cnt, self.total_jumps)+"  @{}s/j".format(int(avg_time_jump))+
-                            "  Fu#: "+str(self.refuel_cnt))
+                    self.update_overlay()
+
+                    avg_time_jump = (time.time()-starttime)/self.jump_cnt
+                    self.ap_ckb('jumpcount', "Dist: {:,.1f}".format(self.total_dist_jumped)+"ly"+
+                                "  Jumps: {}of{}".format(self.jump_cnt, self.total_jumps)+"  @{}s/j".format(int(avg_time_jump))+
+                                "  Fu#: "+str(self.refuel_cnt))
 
                 refueled = self.refuel(scr_reg)
 
