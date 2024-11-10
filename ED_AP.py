@@ -69,7 +69,7 @@ class EDAutopilot:
             "DiscordUserID": "",
             "VoiceEnable": False,
             "VoiceID": 1,                  # my Windows only have 3 defined (0-2)
-            "ElwScannerEnable": False,
+            "ElwScannerEnable": True,
             "LogDEBUG": False,             # enable for debug messages
             "LogINFO": True,
             "Enable_CV_View": 0,  # Should CV View be enabled by default
@@ -798,6 +798,7 @@ class EDAutopilot:
         # if sun in front of us, then keep pitching up until it is below us
         while self.is_sun_dead_ahead(scr_reg):
             self.keys.send('PitchUpButton', state=1)
+            #self.pitchUp(45)
 
             # check if we are being interdicted
             interdicted = self.interdiction_check()
@@ -811,7 +812,8 @@ class EDAutopilot:
                 logger.debug('sun avoid failsafe timeout')
                 print("sun avoid failsafe timeout")
                 break
-                
+            self.keys.send('SetSpeedZero')
+        #self.keys.send('PitchUpButton', state=1)       
         sleep(0.35)                 # up slightly so not to overheat when scooping
         sleep(self.sunpitchuptime)  # some ships heat up too much and need pitch up a little further
         self.keys.send('PitchUpButton', state=0)
@@ -825,6 +827,7 @@ class EDAutopilot:
             self.pitchUp(180)
             self.keys.send('SetSpeed100')
             sleep(3)
+        self.keys.send('SetSpeed100')
         
 
     # we know x, y offset of the nav point from center, use arc tan to determine the angle, convert to degrees
@@ -844,7 +847,7 @@ class EDAutopilot:
         
         self.update_ap_status("Nav Align")
         
-        self.keys.send('SetSpeed50')
+        self.keys.send('SetSpeedZero')
 
         close = 2
         if not (self.jn.ship_state()['status'] == 'in_supercruise' or self.jn.ship_state()['status'] == 'in_space'):
@@ -865,6 +868,7 @@ class EDAutopilot:
             if self.is_sun_dead_ahead(scr_reg):
                 self.sun_avoid(scr_reg)
                 sleep(5)
+                self.keys.send('SetSpeedZero')
             else:
                 if off['y'] >= 0:
                     self.pitchUp(90)
@@ -890,8 +894,9 @@ class EDAutopilot:
                 if self.is_sun_dead_ahead(scr_reg):
                     self.sun_avoid(scr_reg)
                     sleep(5)
+                    self.keys.send('SetSpeedZero')
                 else:
-                    self.rotateLeft(90)
+                    self.rotateLeft(75)
                     if off['y'] >= 0:
                         self.pitchUp(45)
                     if off['y'] < 0:
@@ -927,6 +932,8 @@ class EDAutopilot:
             while off['z'] < 0:
                 if self.is_sun_dead_ahead(scr_reg):
                     self.sun_avoid(scr_reg)
+                    sleep(5)
+                    self.keys.send('SetSpeedZero')
                 else:
                     if off['y'] >= 0:
                         self.pitchUp(45)
@@ -950,6 +957,7 @@ class EDAutopilot:
                 pass
             sleep(.1)
             logger.debug("final x:"+str(off['x'])+" y:"+str(off['y']))
+        self.keys.send('SetSpeed100')
 
     def target_align(self, scr_reg):
         """ Coarse align to the target to support FSD jumping """
@@ -1289,10 +1297,11 @@ class EDAutopilot:
             self.update_ap_status("Refueling")
             
             # mnvr into position
-            self.keys.send('SetSpeed100')
-            sleep(5)
+            self.pitchDown(20)
+            """ self.keys.send('SetSpeed100')
+            sleep(2) """
             self.keys.send('SetSpeed50')
-            sleep(1.7)
+            sleep(3)
             self.keys.send('SetSpeedZero', repeat=3)
             
             self.refuel_cnt += 1

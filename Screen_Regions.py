@@ -16,6 +16,7 @@ Author: sumzer0@yahoo.com
 class Screen_Regions:
     def __init__(self, screen, templ):
         self.screen = screen
+        self.last_bw_percent = {'screen': None, 'quad_1': None, 'quad_2': None, 'quad_3': None, 'quad_4': None}
         self.templates = templ
 
         # Define the thresholds for template matching to be consistent throughout the program
@@ -45,7 +46,11 @@ class Screen_Regions:
         self.reg['mission_dest']  = {'rect': [0.46, 0.38, 0.65, 0.86], 'width': 1, 'height': 1, 'filterCB': self.equalize, 'filter': None}    
         self.reg['missions']    = {'rect': [0.50, 0.78, 0.65, 0.85], 'width': 1, 'height': 1, 'filterCB': self.equalize, 'filter': None}   
         self.reg['nav_panel']   = {'rect': [0.25, 0.36, 0.60, 0.85], 'width': 1, 'height': 1, 'filterCB': self.equalize, 'filter': None}  
-        
+        self.reg['quad_1']   = {'rect': [0, 1, 0.5, 0.5], 'width': 1, 'height': 1, 'filterCB': self.equalize, 'filter': None}  
+        self.reg['quad_2']   = {'rect': [0.5, 1, 1, 0.5], 'width': 1, 'height': 1, 'filterCB': self.equalize, 'filter': None}  
+        self.reg['quad_3']   = {'rect': [0, 0.5, 0.5, 0], 'width': 1, 'height': 1, 'filterCB': self.equalize, 'filter': None}  
+        self.reg['quad_4']   = {'rect': [0.5, 0.5, 1, 0], 'width': 1, 'height': 1, 'filterCB': self.equalize, 'filter': None}  
+        self.reg['screen']   = {'rect': [0, 1, 1, 0], 'width': 1, 'height': 1, 'filterCB': self.equalize, 'filter': None}  
         # convert rect from percent of screen into pixel location, calc the width/height of the area
         for i, key in enumerate(self.reg):
             xx = self.reg[key]['rect']
@@ -126,14 +131,50 @@ class Screen_Regions:
         (thresh, blackAndWhiteImage) = cv2.threshold(hsv, self.sun_threshold, 255, cv2.THRESH_BINARY)
 
         return blackAndWhiteImage
+    
+    def get_bw_percent(self, bwImage):
+        wht = sum(bwImage == 255)     
+        blk = sum(bwImage != 255)
+        return int((wht / (wht+blk))*100)
+
 
     # percent the image is white
     def sun_percent(self, screen):
         blackAndWhiteImage = self.capture_region_filtered(screen, 'sun')
- 
-        wht = sum(blackAndWhiteImage == 255)     
-        blk = sum(blackAndWhiteImage != 255)
 
-        result = int((wht / (wht+blk))*100)
+        return self.get_bw_percent(blackAndWhiteImage)
+    
+    def bw_ratio_compare(self, screen, key):
+        percent_increase = False
+        difference = 0
+        if self.last_bw_percent[key] is not None:
+            bw_screen = self.capture_region_filtered(screen, key)
+            bw_percent = self.get_bw_percent(bw_screen)
+            difference = self.last_bw_percent[key] - bw_percent
+            if difference < 0:         
+                percent_increase = True
+            elif difference > 0:
+                percent_increase = False
+            elif difference == 0:
+                percent_increase = False
+            else:
+                raise ValueError
+            self.last_bw_percent[key] = bw_percent
+        else:
+            bw_screen = self.capture_region_filtered(screen, key)
+            self.last_bw_percent[key] = self.get_bw_percent(bw_screen)
+        return [percent_increase, difference]
 
-        return result
+    
+    def sun_direction(self, screen):
+        bwq1 = self.bw_ratio_compare(screen, 'quad_1')
+        bwq2 = self.bw_ratio_compare(screen, 'quad_2')
+        bwq3 = self.bw_ratio_compare(screen, 'quad_3')
+        bwq4 = self.bw_ratio_compare(screen, 'quad_4')
+
+        #1 & 2 = sun from the top
+        #3 & 4 = sun from the bottom
+        #
+
+
+
