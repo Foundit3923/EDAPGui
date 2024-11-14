@@ -555,7 +555,7 @@ class EDAutopilot:
             #cv2.circle(icompass_image_display, (pt[0]+n_pt[0], pt[1]+n_pt[1]), 5, (0, 255, 0), 3)
             cv2.imshow('compass', icompass_image_d)
             #cv2.imshow('nav', navpt_image)
-            cv2.moveWindow('compass', self.cv_view_x, self.cv_view_y)
+            cv2.moveWindow('compass', self.cv_view_x, self.cv_view_y+300)
             #cv2.moveWindow('nav', self.cv_view_x, self.cv_view_y) 
             cv2.waitKey(10)
 
@@ -1210,6 +1210,10 @@ class EDAutopilot:
         htime = deg/self.rollrate
         self.keys.send('RollLeftButton', hold=htime)
 
+    def zeroSpeedRotateLeft(self, deg):
+        htime = (deg/self.rollrate) * 2
+        self.keys.send('RollLeftButton', hold=htime)
+
     def pitchDown(self, deg):
         htime = deg/self.pitchrate
         self.keys.send('PitchDownButton', htime)
@@ -1261,8 +1265,6 @@ class EDAutopilot:
             for i in range(limit):
                 off = self.get_nav_offset(scr_reg)
                 self.update_ap_status(f'{off}')
-                ang = self.x_angle(off)%90
-                htime = ang/self.rollrate
                 
                 if self.target_above_ship(off, cutoff):
                     target_above += 1
@@ -1271,7 +1273,7 @@ class EDAutopilot:
             self.update_ap_status(f'below: {target_below}, above: {target_above}')
             check_count += 1
         if target_below > target_above:
-            self.rotateLeft(180)
+            self.zeroSpeedRotateLeft(180)
             sleep(3)
 
 
@@ -1740,109 +1742,113 @@ class EDAutopilot:
     # the self.terminate flag is set
     #
     def engine_loop(self):
-        while not self.terminate:
-            if self.fsd_assist_enabled == True:
-                logger.debug("Running fsd_assist")
-                self.set_focus_elite_window()
+        try:
+            while not self.terminate:
+                if self.fsd_assist_enabled == True:
+                    logger.debug("Running fsd_assist")
+                    self.set_focus_elite_window()
+                    self.update_overlay()
+                    self.jump_cnt = 0
+                    self.refuel_cnt = 0
+                    self.total_dist_jumped = 0
+                    self.total_jumps = 0
+                    fin = True
+                    # could be deep in call tree when user disables FSD, so need to trap that exception
+                    try:
+                        fin = self.fsd_assist(self.scrReg)
+                    except EDAP_Interrupt:
+                        logger.debug("Caught stop exception")
+                    except Exception as e:
+                        print("Trapped generic:"+str(e))
+                        traceback.print_exc()
+
+                    self.fsd_assist_enabled = False
+                    self.ap_ckb('fsd_stop')
+                    self.update_overlay()
+
+                    # if fsd_assist returned false then we are not finished, meaning we have an in system target
+                    # defined.  So lets enable Supercruise assist to get us there
+                    # Note: this is tricky, in normal FSD jumps the target is pretty much on the other side of Sun
+                    #  when we arrive, but not so when we are in the final system
+                    if fin == False:
+                        self.ap_ckb("sc_start")
+
+                    # drop all out debug windows
+                    #cv2.destroyAllWindows()
+                    #cv2.waitKey(10)
+
+                elif self.sc_assist_enabled == True:
+                    logger.debug("Running sc_assist")
+                    self.set_focus_elite_window()
+                    self.update_overlay()
+                    try:
+                        self.update_ap_status("SC to Target")
+                        self.sc_assist(self.scrReg)
+                    except EDAP_Interrupt:
+                        logger.debug("Caught stop exception")
+                    except Exception as e:
+                        print("Trapped generic:"+str(e))
+                        traceback.print_exc()
+
+                    logger.debug("Completed sc_assist")
+                    self.sc_assist_enabled = False
+                    self.ap_ckb('sc_stop')
+                    self.update_overlay()
+
+
+                elif self.waypoint_assist_enabled == True:
+                    logger.debug("Running waypoint_assist")
+
+                    self.set_focus_elite_window()
+                    self.update_overlay()
+                    self.jump_cnt = 0
+                    self.refuel_cnt = 0
+                    self.total_dist_jumped = 0
+                    self.total_jumps = 0
+                    try:
+                        self.waypoint_assist(self.scrReg)
+                    except EDAP_Interrupt:
+                        logger.debug("Caught stop exception")
+                    except Exception as e:
+                        print("Trapped generic:"+str(e))
+                        traceback.print_exc()
+
+                    self.waypoint_assist_enabled = False
+                    self.ap_ckb('waypoint_stop')
+                    self.update_overlay()
+
+                elif self.robigo_assist_enabled == True:
+                    logger.debug("Running robigo_assist")
+                    self.set_focus_elite_window()
+                    self.update_overlay()
+                    try:
+                        self.robigo_assist()
+                    except EDAP_Interrupt:
+                        logger.debug("Caught stop exception")
+                    except Exception as e:
+                        print("Trapped generic:"+str(e))
+                        traceback.print_exc()
+
+                    self.robigo_assist_enabled = False
+                    self.ap_ckb('robigo_stop')
+                    self.update_overlay()
+
+                elif self.afk_combat_assist_enabled == True:
+                    self.update_overlay()
+                    try:
+                        self.afk_combat_loop()
+                    except EDAP_Interrupt:
+                        logger.debug("Stopping afk_combat")
+                    self.afk_combat_assist_enabled = False
+                    self.ap_ckb('afk_stop')
+                    self.update_overlay()
+
                 self.update_overlay()
-                self.jump_cnt = 0
-                self.refuel_cnt = 0
-                self.total_dist_jumped = 0
-                self.total_jumps = 0
-                fin = True
-                # could be deep in call tree when user disables FSD, so need to trap that exception
-                try:
-                    fin = self.fsd_assist(self.scrReg)
-                except EDAP_Interrupt:
-                    logger.debug("Caught stop exception")
-                except Exception as e:
-                    print("Trapped generic:"+str(e))
-                    traceback.print_exc()
-
-                self.fsd_assist_enabled = False
-                self.ap_ckb('fsd_stop')
-                self.update_overlay()
-
-                # if fsd_assist returned false then we are not finished, meaning we have an in system target
-                # defined.  So lets enable Supercruise assist to get us there
-                # Note: this is tricky, in normal FSD jumps the target is pretty much on the other side of Sun
-                #  when we arrive, but not so when we are in the final system
-                if fin == False:
-                    self.ap_ckb("sc_start")
-
-                # drop all out debug windows
-                #cv2.destroyAllWindows()
-                #cv2.waitKey(10)
-
-            elif self.sc_assist_enabled == True:
-                logger.debug("Running sc_assist")
-                self.set_focus_elite_window()
-                self.update_overlay()
-                try:
-                    self.update_ap_status("SC to Target")
-                    self.sc_assist(self.scrReg)
-                except EDAP_Interrupt:
-                    logger.debug("Caught stop exception")
-                except Exception as e:
-                    print("Trapped generic:"+str(e))
-                    traceback.print_exc()
-
-                logger.debug("Completed sc_assist")
-                self.sc_assist_enabled = False
-                self.ap_ckb('sc_stop')
-                self.update_overlay()
-
-
-            elif self.waypoint_assist_enabled == True:
-                logger.debug("Running waypoint_assist")
-
-                self.set_focus_elite_window()
-                self.update_overlay()
-                self.jump_cnt = 0
-                self.refuel_cnt = 0
-                self.total_dist_jumped = 0
-                self.total_jumps = 0
-                try:
-                    self.waypoint_assist(self.scrReg)
-                except EDAP_Interrupt:
-                    logger.debug("Caught stop exception")
-                except Exception as e:
-                    print("Trapped generic:"+str(e))
-                    traceback.print_exc()
-
-                self.waypoint_assist_enabled = False
-                self.ap_ckb('waypoint_stop')
-                self.update_overlay()
-
-            elif self.robigo_assist_enabled == True:
-                logger.debug("Running robigo_assist")
-                self.set_focus_elite_window()
-                self.update_overlay()
-                try:
-                    self.robigo_assist()
-                except EDAP_Interrupt:
-                    logger.debug("Caught stop exception")
-                except Exception as e:
-                    print("Trapped generic:"+str(e))
-                    traceback.print_exc()
-
-                self.robigo_assist_enabled = False
-                self.ap_ckb('robigo_stop')
-                self.update_overlay()
-
-            elif self.afk_combat_assist_enabled == True:
-                self.update_overlay()
-                try:
-                    self.afk_combat_loop()
-                except EDAP_Interrupt:
-                    logger.debug("Stopping afk_combat")
-                self.afk_combat_assist_enabled = False
-                self.ap_ckb('afk_stop')
-                self.update_overlay()
-
-            self.update_overlay()
-            cv2.waitKey(10)
-            sleep(1)
+                cv2.waitKey(10)
+                sleep(1)
+        except Exception as e:
+            print(e)
+            self.engine_loop()
 
     def ship_tst_pitch(self):
         """ Performs a ship pitch test by pitching 360 degrees.
